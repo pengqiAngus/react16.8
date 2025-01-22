@@ -3,6 +3,7 @@ let currentRoot = null;
 let wipRoot = null;
 let deletions = [];
 
+// 渲染函数，将元素渲染到容器中
 export function render(element, container) {
   wipRoot = {
     dom: container,
@@ -14,11 +15,12 @@ export function render(element, container) {
   deletions = [];
   nextUnitOfWork = wipRoot;
 }
+requestIdleCallback(workLoop);
 
+// 工作循环，处理每个工作单元
 function workLoop(deadline) {
   let shouldYield = false;
   while (nextUnitOfWork && !shouldYield) {
-    performUintOfWork;
     nextUnitOfWork = performUintOfWork(nextUnitOfWork);
     shouldYield = deadline.timeRemaining() < 1;
   }
@@ -27,50 +29,7 @@ function workLoop(deadline) {
   }
   requestIdleCallback(workLoop);
 }
-requestIdleCallback(workLoop);
 
-function updateFunctionComponent(fiber) {
-    wipFiber = fiber;
-    hookIndex = 0;
-    wipFiber.hooks = [];
-    const children = [fiber.type(fiber.props)];
-  reconcileChildren(fiber, children);
-}
-let wipFiber = null;
-let hookIndex = null;
-
-export function useState(initialState) {
-    const oldHook = wipFiber?.alternate && wipFiber.alternate?.hooks[hookIndex];
-    const hook = {
-        state: oldHook ? oldHook.state : initialState,
-        queue: []
-    }
-    console.log("oldHook", oldHook);
-    const actions = oldHook ? oldHook.queue : [];
-    actions.forEach(action => {
-        hook.state = typeof action==='function' ? action(hook.state) : action;
-    })
-    const setState = (action) => {
-        hook.queue.push(action);
-        wipRoot = {
-            dom: currentRoot.dom,
-            props: currentRoot.props,
-            alternate: currentRoot,
-        };
-        nextUnitOfWork = wipRoot;
-        deletions = [];
-    }
-    wipFiber?.hooks.push(hook);
-    hookIndex++;
-    return [hook.state, setState];
-}
-function updateHostComponent(fiber) {
-  if (!fiber.dom) {
-    fiber.dom = createDom(fiber);
-  }
-  const elements = fiber.props.children;
-  reconcileChildren(fiber, elements);
-}
 
 function performUintOfWork(fiber) {
   const isFunctionComponent = typeof fiber.type === "function";
@@ -79,7 +38,7 @@ function performUintOfWork(fiber) {
   } else {
     updateHostComponent(fiber);
   }
-
+// 深度有限遍历root的每一个dom元素,可能不是一次性完成的
   if (fiber.child) {
     return fiber.child;
   }
@@ -92,6 +51,26 @@ function performUintOfWork(fiber) {
   }
 }
 
+// 更新函数组件
+function updateFunctionComponent(fiber) {
+    wipFiber = fiber;
+    hookIndex = 0;
+    wipFiber.hooks = [];
+    const children = [fiber.type(fiber.props)];
+    reconcileChildren(fiber, children);
+}
+
+function updateHostComponent(fiber) {
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber);
+  }
+  const elements = fiber.props.children;
+  reconcileChildren(fiber, elements);
+}
+let wipFiber = null;
+let hookIndex = null;
+
+// diff 对这一层的dom元素(node节点)进行diff对比
 function reconcileChildren(wipFiber, elements) {
   let index = 0;
   let prevSibling = null;
@@ -138,6 +117,33 @@ function reconcileChildren(wipFiber, elements) {
     index++;
   }
 }
+function commitRoot(params) {
+  deletions.forEach(commitWork);
+  commitWork(wipRoot.child);
+  currentRoot = wipRoot;
+  wipRoot = null;
+}
+function commitWork(fiber) {
+  if (!fiber) {
+    return;
+  }
+  let parentFiber = fiber.parent;
+  while (!parentFiber.dom) {
+    parentFiber = parentFiber.parent;
+  }
+  if (fiber.effectTag === "PLACEMENT" && fiber.dom != null) {
+    parentFiber.dom.appendChild(fiber.dom);
+  } else if (fiber.effectTag === "UPDATE" && fiber.dom != null) {
+    updateDom(fiber.dom, fiber.alternate.props, fiber.props);
+  } else if (fiber.effectTag === "DELETION" && fiber.dom != null) {
+    commitDeletion(fiber, parentFiber);
+  }
+
+  commitWork(fiber.child);
+  commitWork(fiber.sibling);
+}
+
+
 function commitDeletion(fiber, parentFiber) {
   if (fiber.dom) {
     parentFiber.removeChild(fiber.dom);
@@ -146,32 +152,6 @@ function commitDeletion(fiber, parentFiber) {
   }
 }
 
-function commitRoot(params) {
-  deletions.forEach(commitWork);
-  commitWork(wipRoot.child);
-    currentRoot = wipRoot;
-  wipRoot = null;
-}
-function commitWork(fiber) {
-  if (!fiber) {
-    return;
-  }
-    let parentFiber = fiber.parent;
-    while (!parentFiber.dom) {
-      parentFiber = parentFiber.parent;
-    }
-  if (fiber.effectTag === "PLACEMENT" && fiber.dom != null) {
-    
-    parentFiber.dom.appendChild(fiber.dom);
-  } else if (fiber.effectTag === "UPDATE" && fiber.dom != null) {
-    updateDom(fiber.dom, fiber.alternate.props, fiber.props);
-  } else if (fiber.effectTag === "DELETION" && fiber.dom != null) {
-      commitDeletion(fiber, parentFiber);
-  }
-
-  commitWork(fiber.child);
-  commitWork(fiber.sibling);
-}
 
 export function createDom(fiber) {
   const dom =
@@ -181,10 +161,6 @@ export function createDom(fiber) {
   updateDom(dom, {}, fiber.props);
   return dom;
 }
-
-const isEvent = (key) => key.startsWith("on");
-const isProperty = (key) => key !== "children" && !isEvent(key);
-
 function updateDom(dom, prevProps, nextProps) {
   Object.keys(prevProps)
     .filter(isProperty)
@@ -214,4 +190,37 @@ function updateDom(dom, prevProps, nextProps) {
       const eventType = name.replace("on", "");
       dom.addEventListener(eventType, nextProps[name]);
     });
+}
+
+const isEvent = (key) => key.startsWith("on");
+const isProperty = (key) => key !== "children" && !isEvent(key);
+
+
+
+
+
+// 定义useState钩子函数
+export function useState(initialState) {
+    const oldHook = wipFiber?.alternate && wipFiber.alternate?.hooks[hookIndex];
+    const hook = {
+        state: oldHook ? oldHook.state : initialState,
+        queue: []
+    }
+    const actions = oldHook ? oldHook.queue : [];
+    actions.forEach(action => {
+        hook.state = typeof action==='function' ? action(hook.state) : action;
+    })
+    const setState = (action) => {
+        hook.queue.push(action);
+        wipRoot = {
+            dom: currentRoot.dom,
+            props: currentRoot.props,
+            alternate: currentRoot,
+        };
+        nextUnitOfWork = wipRoot;
+        deletions = [];
+    }
+    wipFiber?.hooks.push(hook);
+    hookIndex++;
+    return [hook.state, setState];
 }
