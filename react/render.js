@@ -71,6 +71,9 @@ let wipFiber = null;
 let hookIndex = null;
 
 // diff 对这一层的dom元素(node节点)进行diff对比
+// oldFiber[0] 和element[0] 对比
+// oldFiber[1] 和element[1] 对比
+// element是数组,oldFiber是链表
 function reconcileChildren(wipFiber, elements) {
   let index = 0;
   let prevSibling = null;
